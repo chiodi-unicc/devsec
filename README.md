@@ -24,9 +24,11 @@ runs there with `cwd` = snapshot root, so project tool configs apply as usual.
 ```
 packages/core   pure functions: projections, policy, reports, orchestration (no I/O)
 packages/node   Node implementations of core's ports (exec, fs, watch), shared by the apps
-apps/cli        devsec command
-apps/mcp        MCP server (FastMCP, stdio)
-apps/ui         devsec-ui: SolidJS UI + server, bundled into one npx-able file
+apps/cli        CLI commands (runCli)
+apps/mcp        MCP server (FastMCP, stdio; startMcp)
+apps/ui         SolidJS UI + its server (serveUi)
+apps/devsec     the published `devsec` package: one executable that starts any of the three,
+                bundled with vite into dist/devsec.js (workspace code inlined, fastmcp/zod as deps)
 ```
 
 Core workflows are curried: `scanWith(steps)(deps)(args)`. Core implements the steps and
@@ -38,18 +40,18 @@ MCP progress notifications), so `exec`/`fs`/`now` live once in `@devsec/node`.
 
 ```sh
 pnpm install && pnpm build
-node apps/cli/dist/main.js setup           # pinned toolchain → ~/.devsec/tools (sha256-verified)
+node apps/devsec/dist/devsec.js setup           # pinned toolchain → ~/.devsec/tools (sha256-verified)
 
-node apps/cli/dist/main.js doctor
-node apps/cli/dist/main.js scan            # compact JSON: status, counts, byRule, new findings first
-node apps/cli/dist/main.js findings --new  # page through the rest (--rule, --path, --verdict, --offset)
-node apps/cli/dist/main.js scan --format sarif
-node apps/cli/dist/main.js finding <id>    # full detail + the tool's raw result
-node apps/cli/dist/main.js init            # devsec.json + editable policy in devsec/policy
-node apps/cli/dist/main.js ui              # start/reuse the live UI in the background, open it
-node apps/cli/dist/main.js ui --stop
-npx /path/to/devsec/apps/ui                 # in a repo: live UI on http://127.0.0.1:4321
-claude mcp add devsec -- node /path/to/devsec/apps/mcp/dist/main.js
+node apps/devsec/dist/devsec.js doctor
+node apps/devsec/dist/devsec.js scan            # compact JSON: status, counts, byRule, new findings first
+node apps/devsec/dist/devsec.js findings --new  # page through the rest (--rule, --path, --verdict, --offset)
+node apps/devsec/dist/devsec.js scan --format sarif
+node apps/devsec/dist/devsec.js finding <id>    # full detail + the tool's raw result
+node apps/devsec/dist/devsec.js init            # devsec.json + editable policy in devsec/policy
+node apps/devsec/dist/devsec.js ui              # start/reuse the live UI in the background, open it
+node apps/devsec/dist/devsec.js ui --stop
+node apps/devsec/dist/devsec.js ui --serve   # foreground UI on http://127.0.0.1:4321
+claude mcp add -s local devsec -- node /path/to/devsec/apps/devsec/dist/devsec.js mcp
 ```
 
 Exit codes: 0 pass, 1 policy deny (or warn with `"failOn": "warn"`), 2 error.
@@ -85,22 +87,19 @@ versions that differ from the pinned ones.
 
 ## UI
 
-`devsec-ui` serves the repository in the current folder (`-C <dir>` for another,
+`devsec ui --serve` serves the repository in the current folder (`-C <dir>` for another,
 `--port`, `--open`). It watches `.devsec/runs` with `fs.watch` and pushes changes to the
 browser over one server-sent-events stream, so scans started from the CLI or MCP show up
-and progress live, with no polling. The package is a single bundled `dist/cli.js` plus the
-static client, with no runtime dependencies:
-
-```sh
-devsec ui                                         # from the CLI (MCP: devsec_ui tool)
-cd /path/to/repo && npx /path/to/devsec/apps/ui   # directly, local checkout
-npx @devsec/ui                                    # directly, once published
-```
+and progress live, with no polling.
 
 `devsec ui` / `devsec_ui` start it detached (log: `.devsec/ui.log`, pid and url:
 `.devsec/ui.json`), reuse it when it already serves this repository, and stop it with
-`--stop` / `stop: true`. The launcher is chosen in `@devsec/node` (`uiRunner`):
-`DEVSEC_UI_BIN`, else the local workspace build, else `npx --yes @devsec/ui`.
+`--stop` / `stop: true`. The running executable starts itself (`uiRunner` in
+`@devsec/node`: `node <this devsec.js> ui --serve`), so an installed devsec starts the
+installed UI and a workspace build starts its own. No path is configured.
+
+For UI development with hot reload: `pnpm --filter @devsec/ui dev` (`DEVSEC_REPO` picks
+the repository).
 
 ## .devsec (ignored by git via its own .gitignore)
 
@@ -121,6 +120,31 @@ pnpm test          # unit tests on recorded real tool output, policy via real co
 pnpm typecheck
 pnpm fixtures      # re-record tool output (after tool upgrades)
 pnpm equivalence   # devsec vs direct tool runs must match
+pnpm smoke         # pack the package, install the tarball, run CLI + MCP + UI from it
 ```
 
+### Released vs development build
+
+The released package and your build can coexist. Claude Code prefers a local-scope MCP
+server over a user-scope one with the same name, so register the release once and your
+build only in the repositories where you test it:
+
+```sh
+claude mcp add -s user  devsec -- npx -y devsec@latest mcp                          # everywhere
+claude mcp add -s local devsec -- node /path/to/devsec/apps/devsec/dist/devsec.js mcp  # this repo
+```
+
+On the command line, `devsec` on PATH stays the release; for the build use an alias:
+`alias devsec-dev="node /path/to/devsec/apps/devsec/dist/devsec.js"`. Both share `~/.devsec/tools` and each repository's `.devsec/`.
+
+### Release
+
+1. Set the version in `apps/devsec/package.json` and `CHANGELOG.md`.
+2. Tag `v<version>` and push the tag. `.github/workflows/release.yml` builds, tests, runs
+   the smoke test and publishes with npm provenance (trusted publishing, no token).
+
 See `docs/optimisations.md` for deferred optimisations.
+
+## Licence
+
+Apache-2.0. See [LICENSE](LICENSE).

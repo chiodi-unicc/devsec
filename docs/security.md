@@ -25,11 +25,18 @@ devsec itself sends no data. The scanners download what they need:
 | `devsec setup` and scans | Trivy vulnerability database, when out of date | Trivy's database registry |
 | Scans | Semgrep registry rules (`p/default`, `p/secrets`) | semgrep.dev |
 
-Semgrep runs with `--metrics=off`. Downloading rules sends no code.
+Downloading rules sends no code.
 
-{: .note }
-Syft and Trivy can check for newer versions of themselves. See each tool's documentation
-to turn this off.
+devsec turns off the scanners' own usage reporting and update checks on every run:
+
+| Tool | Setting |
+|------|---------|
+| Semgrep | `--metrics=off`, `SEMGREP_ENABLE_VERSION_CHECK=0` |
+| Trivy | `TRIVY_DISABLE_TELEMETRY=true`, `TRIVY_SKIP_VERSION_CHECK=true` |
+| Syft | `SYFT_CHECK_FOR_APP_UPDATE=false` |
+
+These settings do not change what the scanners find; the project's tests compare
+devsec's results with running each tool directly.
 
 ## Supply chain
 

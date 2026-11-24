@@ -1,11 +1,10 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
-import { closeSync, existsSync, openSync, watch as fsWatch } from "node:fs";
+import { closeSync, openSync, watch as fsWatch } from "node:fs";
 import { appendFile, copyFile, link, mkdir, readdir, readFile, rename, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { err, ok, toolsLayout, type Emit, type Exec, type Fs, type InfraDeps, type SetupDeps, type StartDetached, type UiDeps } from "@devsec/core";
+import { err, ok, toolEnv, toolsLayout, type Emit, type Exec, type Fs, type InfraDeps, type SetupDeps, type StartDetached, type UiDeps } from "@devsec/core";
 
 /**
  * Node.js implementations of core's infrastructure ports, shared by every app.
@@ -17,10 +16,12 @@ export const toolsDir = (): string => process.env["DEVSEC_TOOLS"] ?? join(homedi
 
 /** PATH with the managed tools first: devsec prefers its pinned tools and falls back to the user's. */
 const toolPath = (): string => [toolsLayout(toolsDir()).bin, process.env["PATH"] ?? ""].join(delimiter);
+/** Process environment for a command: managed tools first on PATH, vendor calls off (core's toolEnv). */
+const envFor = (c: { readonly env?: Readonly<Record<string, string>> }) => ({ ...process.env, ...toolEnv, PATH: toolPath(), ...c.env });
 
 export const exec: Exec = (c) =>
   new Promise((resolve) => {
-    const env = { ...process.env, PATH: toolPath(), ...c.env };
+    const env = envFor(c);
     const child = spawn(c.cmd, [...c.args], { cwd: c.cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     const out: Buffer[] = [];
     const errOut: Buffer[] = [];
@@ -119,7 +120,7 @@ export const startDetached: StartDetached = async (c, { logFile, ready, timeoutM
   await mkdir(dirname(logFile), { recursive: true });
   const fd = openSync(logFile, "a");
   let exited: number | null | undefined;
-  const child = spawn(c.cmd, [...c.args], { cwd: c.cwd, env: { ...process.env, PATH: toolPath(), ...c.env }, detached: true, stdio: ["ignore", fd, fd] });
+  const child = spawn(c.cmd, [...c.args], { cwd: c.cwd, env: envFor(c), detached: true, stdio: ["ignore", fd, fd] });
   closeSync(fd);
   child.on("exit", (code) => (exited = code));
   child.on("error", () => (exited = 127));
@@ -163,15 +164,13 @@ export const openUrl = async (url: string): Promise<void> => {
 };
 
 /**
- * How to launch the UI: `DEVSEC_UI_BIN`, else the local workspace build.
- * No npx fallback until @devsec/ui is published under a name we own: `npx --yes` of an
- * unclaimed package name would run whatever someone else publishes there.
+ * How to launch the UI: the running devsec executable starts itself with `ui --serve`.
+ * The installed package starts the installed UI, a workspace build starts its own,
+ * so no path is configured anywhere.
  */
 export const uiRunner = (): readonly [string, ...string[]] | undefined => {
-  const override = process.env["DEVSEC_UI_BIN"];
-  if (override) return ["node", override];
-  const local = fileURLToPath(new URL("../../../apps/ui/dist/cli.js", import.meta.url));
-  return existsSync(local) ? ["node", local] : undefined;
+  const self = process.argv[1];
+  return self ? [process.execPath, self, "ui", "--serve"] : undefined;
 };
 
 /** Infra deps for the `ui` workflow. */

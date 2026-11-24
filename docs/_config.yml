@@ -39,3 +39,5 @@ callouts:
   important:
     title: Important
     color: red
+
+footer_content: "devsec is licensed under the <a href=\"https://github.com/chiodi-unicc/devsec/blob/main/LICENSE\">Apache License 2.0</a>."

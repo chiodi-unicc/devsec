@@ -44,6 +44,8 @@ and marks each finding `new` or existing. Only new `deny` findings fail the scan
 
 The baseline scan is cached per commit, so it costs time only once.
 
+![A scan of uncommitted changes that passes: the Baseline step compared it with HEAD and found nothing new]({{ "/assets/dashboard-pass.png" | relative_url }})
+
 Finding ids do not depend on line numbers (rule, file and matched code), so moving
 code does not make a finding new.
 

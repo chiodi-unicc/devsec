@@ -16,7 +16,7 @@ The dashboard starts in the background and opens in your browser at
 `http://127.0.0.1:4321` (the next free port if that one is taken). An agent can open it
 with the `devsec_ui` tool.
 
-<!-- TODO screenshot: assets/dashboard.png -->
+![The dashboard showing a failed scan: each pipeline step, reused from cache, and the flagged findings]({{ "/assets/dashboard-fail.png" | relative_url }})
 
 It shows:
 

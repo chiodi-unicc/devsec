@@ -17,7 +17,7 @@ export type StartDetached = (
 export type Probe = (url: string) => Promise<string | undefined>;
 
 export type UiDeps = InfraDeps & {
-  /** How to launch the UI, e.g. ["node", "/…/apps/ui/dist/cli.js"]; undefined when no UI is available. */
+  /** How to launch the UI server, e.g. [node, /…/devsec.js, "ui", "--serve"]; undefined when unavailable. */
   readonly uiRunner: readonly [string, ...string[]] | undefined;
   readonly startDetached: StartDetached;
   readonly probe: Probe;
@@ -83,7 +83,7 @@ export const uiWith =
     }
 
     if (deps.uiRunner === undefined) {
-      return err({ type: "tool-missing", tool: "devsec-ui (build apps/ui, or set DEVSEC_UI_BIN to its dist/cli.js)" });
+      return err({ type: "tool-missing", tool: "devsec ui (start it from the devsec executable)" });
     }
     await deps.fs.mkdir(layout.root);
     await deps.fs.writeText(layout.gitignore, devsecGitignore);

@@ -27,6 +27,22 @@ importers:
         specifier: workspace:*
         version: link:../../packages/node
 
+  apps/devsec:
+    dependencies:
+      fastmcp:
+        specifier: ^4.28.4
+        version: 4.28.4(ajv-formats@3.0.1(ajv@8.20.0))(ajv@8.20.0)(jose@6.2.18)(openapi-types@12.1.3)
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      vite:
+        specifier: ^8.3.8
+        version: 8.3.8(@types/node@26.6.6)
+
   apps/mcp:
     dependencies:
       '@devsec/core':

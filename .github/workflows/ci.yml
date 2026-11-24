@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm typecheck
+
+      # Scanners: the pinned toolchain, cached until the pins change.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.devsec/tools
+          key: devsec-tools-${{ runner.os }}-${{ hashFiles('packages/core/src/setup/toolchain.ts') }}
+      - run: node apps/devsec/dist/devsec.js setup
+      - run: echo "$HOME/.devsec/tools/bin" >> "$GITHUB_PATH"
+
+      - run: pnpm test
+      - run: pnpm equivalence
+      - run: pnpm smoke

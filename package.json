@@ -4,14 +4,15 @@
   "type": "module",
   "description": "Local DevSec(Ops) toolkit",
   "scripts": {
-    "build": "pnpm -r build",
-    "typecheck": "tsc -b && tsc -p packages/core/tsconfig.test.json && pnpm --filter @devsec/ui typecheck",
+    "build": "pnpm -r --filter '!devsec' build && pnpm --filter devsec build",
+    "typecheck": "tsc -b && tsc -p packages/core/tsconfig.test.json && pnpm --filter @devsec/ui typecheck && tsc -p apps/devsec/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "clean": "pnpm -r exec rm -rf dist *.tsbuildinfo",
     "fixtures": "./scripts/record-fixtures.sh",
     "equivalence": "./scripts/equivalence.sh",
-    "ui": "node apps/ui/dist/cli.js"
+    "ui": "node apps/devsec/dist/devsec.js ui --serve --open",
+    "smoke": "./scripts/smoke-package.sh"
   },
   "engines": {
     "node": ">=24"
@@ -20,5 +21,6 @@
     "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
     "vitest": "^5.1.1"
-  }
+  },
+  "license": "Apache-2.0"
 }

@@ -1,0 +1,43 @@
+name: Release
+
+# Publishes the devsec package when a version tag (v0.1.0, ...) is pushed.
+# Uses npm trusted publishing (GitHub OIDC): no npm token is stored in the repository,
+# and npm records provenance linking the package to this commit and workflow.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pnpm install --frozen-lockfile
+      - name: Tag matches package version
+        run: test "v$(node -p 'require("./apps/devsec/package.json").version')" = "$GITHUB_REF_NAME"
+      - run: pnpm build
+      - run: pnpm typecheck
+      - run: node apps/devsec/dist/devsec.js setup
+      - run: echo "$HOME/.devsec/tools/bin" >> "$GITHUB_PATH"
+      - run: pnpm test
+      - run: pnpm smoke
+      - run: npm install -g npm@latest
+      - run: npm publish --provenance --access public
+        working-directory: apps/devsec

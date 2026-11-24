@@ -1,0 +1,54 @@
+{
+  "name": "devsec",
+  "version": "0.1.0",
+  "description": "Local security scanning for coding agents: Semgrep, Trivy and Syft with a Rego policy, as a CLI, MCP server and live dashboard.",
+  "license": "Apache-2.0",
+  "author": "g_chiodi",
+  "type": "module",
+  "bin": {
+    "devsec": "./dist/devsec.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chiodi-unicc/devsec.git"
+  },
+  "homepage": "https://chiodi-unicc.github.io/devsec/",
+  "bugs": "https://github.com/chiodi-unicc/devsec/issues",
+  "keywords": [
+    "security",
+    "devsecops",
+    "sast",
+    "sca",
+    "secrets",
+    "sbom",
+    "semgrep",
+    "trivy",
+    "syft",
+    "mcp",
+    "coding-agents"
+  ],
+  "scripts": {
+    "build": "vite build && rm -rf dist/client && cp -R ../ui/dist/client dist/client && chmod +x dist/devsec.js",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "fastmcp": "^4.28.4",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "vite": "^8.3.8"
+  }
+}

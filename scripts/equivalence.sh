@@ -15,7 +15,7 @@ trivy fs --quiet --scanners secret --format json --output "$direct/trivy-secrets
 syft scan dir:. --quiet --output cyclonedx-json="$direct/sbom.cdx.json"
 trivy sbom --quiet --format json --output "$direct/trivy-sca.json" "$direct/sbom.cdx.json"
 
-node "$root/apps/cli/dist/main.js" scan -C "$repo" --quiet >/dev/null || true
+node "$root/apps/devsec/dist/devsec.js" scan -C "$repo" --quiet >/dev/null || true
 run="$repo/.devsec/latest"
 
 status=0
