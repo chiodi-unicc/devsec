@@ -23,15 +23,25 @@ devsec_bin() { "$work/app/node_modules/.bin/devsec" "$@"; }
 echo "  version: $(devsec_bin --version)"
 
 step "doctor"
-devsec_bin doctor >/dev/null && echo "  ok"
+if ! devsec_bin doctor >"$work/doctor.json"; then
+  cat "$work/doctor.json"
+  echo "  doctor failed: install the scanners with 'devsec setup' (or put them on PATH)"
+  exit 1
+fi
+echo "  ok"
 
 step "scan the example repo (expect exit 1: policy fails)"
-"$root/scripts/make-example.sh" "$work/repo" >/dev/null
+"$root/scripts/make-example.sh" "$work/repo"
 set +e
-devsec_bin scan -C "$work/repo" --quiet >"$work/scan.json"
+devsec_bin scan -C "$work/repo" >"$work/scan.json" 2>"$work/scan.err"
 code=$?
 set -e
-[ "$code" -eq 1 ] || { echo "  expected exit 1, got $code"; exit 1; }
+if [ "$code" -ne 1 ]; then
+  echo "  expected exit 1 (policy fails), got $code"
+  echo "  -- progress and errors:"; sed 's/^/  /' "$work/scan.err"
+  echo "  -- result:"; sed 's/^/  /' "$work/scan.json"
+  exit 1
+fi
 node -e 'const r=require(process.argv[1]); console.log("  " + r.summary)' "$work/scan.json"
 
 step "mcp: initialize and list tools"
