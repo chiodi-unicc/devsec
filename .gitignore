@@ -4,3 +4,9 @@ dist/
 .DS_Store
 coverage/
 .env*
+
+# Jekyll docs
+docs/_site/
+docs/.jekyll-cache/
+docs/vendor/
+docs/.bundle/

@@ -1,0 +1,21 @@
+title: devsec
+description: Local security scanning for coding agents
+theme: just-the-docs
+
+url: https://chiodi-unicc.github.io
+baseurl: /devsec
+
+aux_links:
+  GitHub: https://github.com/chiodi-unicc/devsec
+aux_links_new_tab: true
+
+search_enabled: true
+heading_anchors: true
+color_scheme: light
+
+# Internal notes, not published.
+exclude:
+  - optimisations.md
+  - Gemfile
+  - Gemfile.lock
+  - vendor
