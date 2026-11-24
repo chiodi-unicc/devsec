@@ -1,0 +1,30 @@
+{
+  "name": "@devsec/ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Live local UI for devsec: run `npx @devsec/ui` in a repository to watch scans, findings and policy.",
+  "bin": {
+    "devsec-ui": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && vite build -c vite.server.config.ts && chmod +x dist/cli.js",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.server.json && tsc -p tsconfig.node.json",
+    "start": "node dist/cli.js"
+  },
+  "devDependencies": {
+    "@devsec/core": "workspace:*",
+    "@devsec/node": "workspace:*",
+    "@types/node": "^26.6.6",
+    "solid-js": "1.9.20",
+    "vite": "^8.3.8",
+    "vite-plugin-solid": "^2.11.17"
+  }
+}

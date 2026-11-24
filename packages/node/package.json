@@ -1,0 +1,26 @@
+{
+  "name": "@devsec/node",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Node.js implementations of @devsec/core's infrastructure ports (exec, fs, watch). No domain logic.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@devsec/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6"
+  }
+}
