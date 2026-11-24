@@ -9,6 +9,10 @@ nav_order: 1
 Security checks for code changes, run locally before you commit.
 {: .fs-6 .fw-300 }
 
+{: .prototype }
+devsec is a prototype under active development and testing. Commands, output and
+configuration may change without notice. Do not rely on it as a security control.
+
 [Get started](getting-started){: .btn .btn-primary .mr-2 }
 [How it works](how-it-works){: .btn }
 

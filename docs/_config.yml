@@ -28,3 +28,14 @@ defaults:
       path: ""
     values:
       layout: default
+
+callouts:
+  prototype:
+    title: Prototype
+    color: yellow
+  note:
+    title: Note
+    color: blue
+  important:
+    title: Important
+    color: red
