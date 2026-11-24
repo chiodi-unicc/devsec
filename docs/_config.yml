@@ -19,3 +19,12 @@ exclude:
   - Gemfile
   - Gemfile.lock
   - vendor
+
+mermaid:
+  version: "11.4.1"
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
