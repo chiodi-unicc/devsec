@@ -29,19 +29,30 @@ export type Step<I, O> = (deps: ScanDeps) => (input: I) => Promise<Result<O, Dev
 
 export type Versions = { readonly found: Partial<ToolVersions>; readonly missing: readonly ToolName[] };
 
-export type CachedScan = { readonly findings: readonly Finding[] };
+export type CachedScan = {
+  readonly findings: readonly Finding[];
+  /** When the reused scan ran, and the run that holds it. */
+  readonly scannedAt: number;
+  readonly sourceRunId: string;
+};
 
 export type ScanSteps = {
   readonly versions: Step<{ readonly cwd: string }, Versions>;
   readonly subject: Step<{ readonly cwd: string; readonly ref?: string }, Subject>;
   readonly config: Step<{ readonly repoRoot: string }, Config>;
-  readonly cache: Step<{ readonly run: RunLayout; readonly key: string; readonly ttlHours: number }, CachedScan | undefined>;
+  readonly cache: Step<
+    { readonly run: RunLayout; readonly layout: WorkspaceLayout; readonly key: string; readonly ttlHours: number },
+    CachedScan | undefined
+  >;
   readonly snapshot: Step<{ readonly subject: Subject; readonly layout: WorkspaceLayout }, string>;
   readonly sbom: Step<{ readonly snapshot: string; readonly run: RunLayout }, string>;
   readonly semgrep: Step<{ readonly snapshot: string; readonly run: RunLayout; readonly rulesets: readonly string[] }, Finding[]>;
   readonly trivySecrets: Step<{ readonly snapshot: string; readonly run: RunLayout }, Finding[]>;
   readonly trivySca: Step<{ readonly snapshot: string; readonly run: RunLayout; readonly sbom: string }, Finding[]>;
-  readonly saveScan: Step<{ readonly run: RunLayout; readonly key: string; readonly findings: readonly Finding[]; readonly complete: boolean }, void>;
+  readonly saveScan: Step<
+    { readonly run: RunLayout; readonly layout: WorkspaceLayout; readonly key: string; readonly findings: readonly Finding[]; readonly complete: boolean },
+    void
+  >;
   readonly policy: Step<
     {
       readonly subject: Subject;
@@ -59,6 +70,8 @@ export type ScanSteps = {
       readonly runId: string;
       readonly run: RunLayout;
       readonly scanners: readonly ScannerId[];
+      /** Not every configured scanner ran. */
+      readonly partial: boolean;
       readonly judgement: Judgement;
       readonly errors: readonly string[];
       readonly failOn: Config["failOn"];

@@ -98,6 +98,7 @@ const commands: Record<string, () => Promise<number>> = {
       ...(values.baseline !== undefined ? { baseline: values.baseline } : {}),
     });
     if (!r.ok) return fail(describeError(r.error));
+    if (!values.quiet) process.stderr.write(`devsec: ${r.value.report.summary}\n`);
     if (values.format === "sarif") process.stdout.write(await readFile(r.value.reportSarif, "utf8"));
     else if (values.full) print(r.value.report);
     else print(agentView(r.value.report, { ...(values.all ? { scope: "all" as const } : {}), ...(limit !== undefined ? { limit } : {}) }));

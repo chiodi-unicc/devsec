@@ -9,7 +9,7 @@ import { agentReport } from "../report/json.js";
 import { filterSarif, mergeSarif, sarifLocation } from "../report/sarif.js";
 import * as g from "../subject/git.js";
 import { projectSemgrep, semgrepCommand, semgrepKey, semgrepRawJson, semgrepRawSarif, semgrepResultPaths } from "../tools/semgrep.js";
-import { sbomCycloneDx, syftCommand } from "../tools/syft.js";
+import { sbomCycloneDx, sbomSpdx, syftCommand } from "../tools/syft.js";
 import {
   filterTrivyReport,
   projectTrivySecrets,
@@ -107,14 +107,30 @@ const config: ScanSteps["config"] = (deps) => async ({ repoRoot }) => {
 
 const scanMeta = (dir: string) => `${dir}/scan.json`;
 
-/** Reuse a complete earlier scan with the same key, within the TTL. */
-const cache: ScanSteps["cache"] = (deps) => async ({ run, key, ttlHours }) => {
-  const meta = rec(safeJson(await deps.fs.readText(scanMeta(run.dir))));
+/** Tool outputs a run directory holds (copied on a cache hit so every run stays self-contained). */
+const scanArtifacts = ["findings.json", "scan.json", sbomCycloneDx, sbomSpdx] as const;
+
+/**
+ * Reuse a complete earlier scan with the same key, within the TTL. The scan may belong to a
+ * different run (another baseline or purpose): its tool outputs are copied into this run.
+ */
+const cache: ScanSteps["cache"] = (deps) => async ({ run, layout, key, ttlHours }) => {
+  const index = rec(safeJson(await deps.fs.readText(layout.scanIndex(key))));
+  const source = str(index["runDir"]);
+  if (source === undefined) return ok(undefined);
+  const meta = rec(safeJson(await deps.fs.readText(scanMeta(source))));
   const scannedAt = num(meta["scannedAt"]);
   if (meta["key"] !== key || meta["complete"] !== true || scannedAt === undefined) return ok(undefined);
   if (deps.now() - scannedAt > ttlHours * 3_600_000) return ok(undefined);
-  const findings = safeJson(await deps.fs.readText(run.findings));
-  return ok(Array.isArray(findings) ? { findings: findings as Finding[] } : undefined);
+  const findings = safeJson(await deps.fs.readText(`${source}/findings.json`));
+  if (!Array.isArray(findings)) return ok(undefined);
+  if (source !== run.dir) {
+    // Hard links: each run stays self-contained without storing the tool outputs twice.
+    for (const f of scanArtifacts) if (await deps.fs.exists(`${source}/${f}`)) await deps.fs.linkFile(`${source}/${f}`, `${run.dir}/${f}`);
+    const raw = `${source}/raw`;
+    if (await deps.fs.exists(raw)) for (const f of await deps.fs.readdir(raw)) await deps.fs.linkFile(`${raw}/${f}`, `${run.raw}/${f}`);
+  }
+  return ok({ findings: findings as Finding[], scannedAt, sourceRunId: source.split("/").at(-1) ?? source });
 };
 
 const safeJson = (text: string | undefined): unknown => {
@@ -126,9 +142,10 @@ const safeJson = (text: string | undefined): unknown => {
   }
 };
 
-const saveScan: ScanSteps["saveScan"] = (deps) => async ({ run, key, findings, complete }) => {
+const saveScan: ScanSteps["saveScan"] = (deps) => async ({ run, layout, key, findings, complete }) => {
   await deps.fs.writeText(run.findings, toJson(findings));
   await deps.fs.writeText(scanMeta(run.dir), toJson({ key, complete, scannedAt: deps.now() }));
+  if (complete) await deps.fs.writeText(layout.scanIndex(key), toJson({ runDir: run.dir }));
   return ok(undefined);
 };
 
@@ -232,8 +249,8 @@ const policy: ScanSteps["policy"] = (deps) => async ({ subject: s, findings, con
 const semgrepSarifKey = (r: Json) => semgrepKey(str(r["ruleId"]) ?? "", sarifLocation(r));
 
 /** Report = agent JSON + SARIF made of each tool's own SARIF, keeping only flagged results. */
-const report: ScanSteps["report"] = (deps) => async ({ subject: s, runId, run, scanners, judgement, errors, failOn, baseline }) => {
-  const result = agentReport({ subject: s, runId, runDir: run.dir, scanners, judgement, errors, failOn, ...(baseline ? { baseline } : {}) });
+const report: ScanSteps["report"] = (deps) => async ({ subject: s, runId, run, scanners, partial, judgement, errors, failOn, baseline }) => {
+  const result = agentReport({ subject: s, runId, runDir: run.dir, scanners, partial, judgement, errors, failOn, ...(baseline ? { baseline } : {}) });
   await deps.fs.writeText(run.reportJson, toJson(result));
 
   const flagged = judgement.flagged.map((j) => j.finding);
@@ -257,6 +274,15 @@ const report: ScanSteps["report"] = (deps) => async ({ subject: s, runId, run, s
   }
   await deps.fs.writeText(run.reportSarif, toJson(mergeSarif(logs)));
   return ok(result);
+};
+
+/**
+ * Before tools write into a run directory, remove earlier outputs: tools rewrite their output
+ * files in place, which would change a hard-linked copy shared with another run.
+ */
+export const clearScanOutputs = (deps: { readonly fs: { readonly rm: (p: string) => Promise<void> } }) => async (run: { readonly dir: string; readonly raw: string }) => {
+  await deps.fs.rm(run.raw);
+  for (const f of scanArtifacts) await deps.fs.rm(`${run.dir}/${f}`);
 };
 
 export const scanSteps: ScanSteps = {

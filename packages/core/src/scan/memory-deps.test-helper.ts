@@ -17,6 +17,7 @@ export const memoryDeps = (start = 1_000_000) => {
     exists: async (p) => [...files.keys()].some((k) => k === p || k.startsWith(`${p}/`)),
     readdir: async () => [],
     copyFile: async (a, b) => void files.set(b, files.get(a) ?? ""),
+    linkFile: async (a, b) => void files.set(b, files.get(a) ?? ""),
     symlink: async (target) => void files.set("@latest", target),
   };
   const deps: InfraDeps = {

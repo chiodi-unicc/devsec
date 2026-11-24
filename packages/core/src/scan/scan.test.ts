@@ -42,7 +42,9 @@ const fakeSteps = (calls: string[], over: Partial<ScanSteps> = {}): ScanSteps =>
     }),
   report: (deps) => async (input) => {
     const { agentReport } = await import("../report/json.js");
-    return ok(agentReport({ ...input, runDir: input.run.dir }));
+    const r = agentReport({ ...input, runDir: input.run.dir });
+    await deps.fs.writeText(input.run.reportJson, JSON.stringify(r));
+    return ok(r);
   },
   ...over,
 });
@@ -51,6 +53,61 @@ const timeline = (events: readonly DevsecEvent[]) =>
   events.flatMap((e) => (e.type === "step.started" || e.type === "step.finished" ? [`${e.type === "step.started" ? "+" : "-"}${e.step}`] : []));
 
 describe("scanWith", () => {
+  it("records cache hits and misses on the cache step", async () => {
+    const m = memoryDeps();
+    const steps = fakeSteps([]);
+    const first = await scanWith(steps)(m.deps)({ cwd: "/repo" });
+    // Same files and scanners, different run (a baseline-purpose run): the scan is shared via the cache.
+    const second = await scanWith(steps)(m.deps)({ cwd: "/repo", purpose: "baseline" });
+    if (!first.ok || !second.ok) throw new Error("scan failed");
+    const cacheEvent = (runId: string) =>
+      (m.files.get(`/repo/.devsec/runs/${runId}/events.jsonl`) ?? "")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l))
+        .find((e) => e.type === "step.finished" && e.step === "cache");
+    expect(cacheEvent(first.value.report.runId)).toMatchObject({ cache: { hit: false }, reason: expect.stringMatching(/^miss: /) });
+    expect(cacheEvent(second.value.report.runId)).toMatchObject({ cache: { hit: true }, reason: expect.stringMatching(/^hit: reusing the scan from /) });
+  });
+
+  it("keeps one report per baseline for the same files, sharing the cached tool outputs", async () => {
+    const { deps, files } = memoryDeps();
+    const calls: string[] = [];
+    const steps = fakeSteps(calls, {
+      subject: () => async (input) =>
+        ok(
+          input.ref === "HEAD"
+            ? { repoRoot: "/repo", treeSha: "base000000000000", headSha: "h", dirty: false, ref: "HEAD" }
+            : { repoRoot: "/repo", treeSha: "work000000000000", headSha: "h", dirty: true },
+        ),
+      snapshot: () => async ({ subject }) => ok(`/repo/.devsec/snapshots/${subject.treeSha}`),
+    });
+    const withHead = await scanWith(steps)(deps)({ cwd: "/repo" });
+    const semgrepRuns = () => calls.filter((c) => c === "semgrep").length;
+    const before = semgrepRuns();
+    const withNone = await scanWith(steps)(deps)({ cwd: "/repo", baseline: "none" });
+    if (!withHead.ok || !withNone.ok) throw new Error("scan failed");
+    expect(withNone.value.report.runId).not.toBe(withHead.value.report.runId);
+    expect(semgrepRuns()).toBe(before); // tool outputs reused from the cache
+    const stored = (id: string) => JSON.parse(files.get(`/repo/.devsec/runs/${id}/report.json`) ?? "{}");
+    expect(stored(withHead.value.report.runId).baseline?.ref).toBe("HEAD");
+    expect(stored(withNone.value.report.runId).baseline).toBeUndefined();
+  });
+
+  it("says when a scan was partial, and neither partial nor --ref scans move latest", async () => {
+    const { deps, files } = memoryDeps();
+    const steps = fakeSteps([]);
+    const full = await scanWith(steps)(deps)({ cwd: "/repo" });
+    const partial = await scanWith(steps)(deps)({ cwd: "/repo", scanners: ["trivy-sca"] });
+    expect(partial.ok && partial.value.report.summary).toMatch(/^fail \(trivy-sca only\): /);
+    expect(full.ok && full.value.report.summary).toMatch(/^fail: /);
+    const refSteps = fakeSteps([], {
+      subject: () => async (input) => ok({ repoRoot: "/repo", treeSha: "ref0000000000000", dirty: false, ...(input.ref ? { ref: input.ref } : {}) }),
+    });
+    await scanWith(refSteps)(deps)({ cwd: "/repo", ref: "v1" });
+    expect(full.ok && files.get("@latest")).toBe(`runs/${full.ok && full.value.report.runId}`);
+  });
+
   it("reports findings the baseline did not have as new, and gates only on those", async () => {
     const { deps, files } = memoryDeps();
     const steps = fakeSteps([], {
@@ -79,6 +136,9 @@ describe("scanWith", () => {
     const clean = fakeSteps([], { ...steps, semgrep: () => async () => ok([f("s1", "semgrep")]) });
     const r2 = await scanWith(clean)(memoryDeps().deps)({ cwd: "/repo" }); // fresh deps: no cached scan
     expect(r2.ok && [r2.value.report.status, r2.value.report.counts.deny, r2.value.report.counts.new]).toEqual(["pass", 3, 0]);
+    expect(r2.ok && r2.value.report.existing).toEqual({ deny: 3, warn: 0 });
+    expect(r2.ok && r2.value.report.summary).toBe("pass: no new findings (3 existing deny, 0 existing warn from HEAD, not counted)");
+    expect(rep.summary).toBe("fail: 1 new deny, 0 new warn (3 existing deny, 0 existing warn from HEAD, not counted)");
 
     // "none" disables the baseline.
     const r3 = await scanWith(steps)(deps)({ cwd: "/repo", baseline: "none" });

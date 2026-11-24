@@ -30,6 +30,9 @@ export const RunList = (props: { store: Store }) => {
                 <span class="run-main">
                   <code>{short(run.subject?.treeSha)}</code>
                   <Show when={run.subject?.dirty}><span class="tag">dirty</span></Show>
+                  <Show when={run.partialScanners}>
+                    {(sc) => <span class="tag" title="partial scan: only some scanners ran">{sc().join(", ")} only</span>}
+                  </Show>
                   <Show when={run.purpose === "baseline"} fallback={<Show when={run.subject?.ref}><span class="tag">{run.subject?.ref}</span></Show>}>
                     <span class="tag" title="scanned as the baseline for another run">baseline {run.subject?.ref}</span>
                   </Show>

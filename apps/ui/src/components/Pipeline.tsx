@@ -18,6 +18,9 @@ type Props = { state: RunState; meta: RunMeta | undefined; report: AgentReport |
 /** One-line summary of what a step produced, from live state plus run.json / report when available. */
 const summary = (id: StepId, p: Props): string => {
   const s = p.state.steps[id];
+  // A skipped or reused step explains itself: the reason is recorded by core when it decides.
+  if (s?.reason && s.status === "skipped") return `skipped: ${s.reason}`;
+  if (s?.reason && s.status === "cached") return s.reason;
   const subject = p.state.subject;
   switch (id) {
     case "versions":
@@ -27,14 +30,14 @@ const summary = (id: StepId, p: Props): string => {
     case "config":
       return p.meta ? `scanners: ${p.meta.scanners.join(", ")}` : "";
     case "cache":
-      return stepStatus(p.state, "semgrep") === "cached" ? "hit: reusing an identical scan" : s?.status === "ok" ? "miss: scanning" : "";
+      return s?.reason ?? (stepStatus(p.state, "semgrep") === "cached" ? "hit: reusing an identical scan" : s?.status === "ok" ? "miss: scanning" : "");
     case "snapshot":
       return subject ? `.devsec/snapshots/${short(subject.treeSha)}…` : "";
     case "baseline":
       return p.report?.baseline
         ? `${p.report.baseline.ref} (tree ${short(p.report.baseline.tree)}) · ${p.report.counts.new ?? 0} new`
         : s?.status === "skipped"
-          ? "none (all findings shown)"
+          ? "skipped: no baseline (all findings count)"
           : "";
     case "policy":
       return p.report ? `${p.report.counts.deny} deny · ${p.report.counts.warn} warn · ${p.report.counts.dropped} dropped` : "";
@@ -74,7 +77,9 @@ const StepRow = (props: { id: StepId; p: Props; after?: boolean }) => {
           <StatusIcon status={status()} />
         </span>
         <span class="step-label">{info().label}</span>
-        <span class="step-summary">{summary(props.id, props.p)}</span>
+        <span class="step-summary" classList={{ reason: step()?.reason !== undefined }} title={step()?.reason ?? ""}>
+          {summary(props.id, props.p)}
+        </span>
         <span class="step-time">{timeOf(props.id, props.p)}</span>
         <span class="chev" aria-hidden="true">{expanded() ? "▾" : "▸"}</span>
       </button>
@@ -85,6 +90,10 @@ const StepRow = (props: { id: StepId; p: Props; after?: boolean }) => {
           <dl>
             <dt>status</dt>
             <dd>{status()}</dd>
+            <Show when={step()?.reason}>
+              <dt>{status() === "skipped" ? "why skipped" : "why"}</dt>
+              <dd class="why">{step()?.reason}</dd>
+            </Show>
             <Show when={version()}>
               <dt>{info().tool}</dt>
               <dd>{version()}{info().tool === "trivy" && props.p.meta?.tools["trivyDb"] ? ` (vulnerability DB ${props.p.meta.tools["trivyDb"]?.slice(0, 10)})` : ""}</dd>

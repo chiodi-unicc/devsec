@@ -16,7 +16,7 @@ export type Exec = (command: Command) => Promise<ExecOutput>;
 export type Fs = {
   /** undefined when the file does not exist. */
   readonly readText: (path: string) => Promise<string | undefined>;
-  /** Creates parent directories as needed. */
+  /** Creates parent directories as needed. Replaces the file atomically (never rewrites it in place). */
   readonly writeText: (path: string, data: string) => Promise<void>;
   /** Creates parent directories as needed. */
   readonly appendText: (path: string, data: string) => Promise<void>;
@@ -26,6 +26,11 @@ export type Fs = {
   readonly exists: (path: string) => Promise<boolean>;
   readonly readdir: (path: string) => Promise<readonly string[]>;
   readonly copyFile: (from: string, to: string) => Promise<void>;
+  /**
+   * Share a file that is never modified in place: hard link, falling back to a copy (e.g. across
+   * file systems). Safe because writeText replaces files (temp + rename) instead of rewriting them.
+   */
+  readonly linkFile: (from: string, to: string) => Promise<void>;
   /** Create or replace a symlink at `path` pointing to `target` (relative target allowed). */
   readonly symlink: (target: string, path: string) => Promise<void>;
 };

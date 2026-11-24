@@ -17,6 +17,7 @@ const f = (id: string, rule: string, verdict: "deny" | "warn", isNew?: boolean, 
 
 const report = (findings: AgentFinding[], baseline = false): AgentReport => ({
   status: "fail",
+  summary: "",
   runId: "r",
   run: "/r",
   scanners: ["semgrep"],

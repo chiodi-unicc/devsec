@@ -33,7 +33,8 @@ const json = (v: unknown) => JSON.stringify(v);
 server.addTool({
   name: "devsec_scan",
   description:
-    "Scan the working tree (or a commit with `ref`) and return a compact result: status pass|fail|error, runId, " +
+    "Scan the working tree (or a commit with `ref`) and return a compact result: status pass|fail|error, summary " +
+    "(one line; with a baseline it also states the existing findings that did not count), runId, existing, " +
     "counts (found = flagged + dropped; new = flagged findings the baseline did not have), byRule (one line per rule), " +
     "and up to `limit` findings (verdict deny|warn, severity, rule, path:line or package, fix, new). " +
     "With uncommitted changes the baseline defaults to HEAD, so findings marked new are the ones your changes introduced, " +

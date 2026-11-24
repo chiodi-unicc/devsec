@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { closeSync, existsSync, openSync, watch as fsWatch } from "node:fs";
-import { appendFile, copyFile, mkdir, readdir, readFile, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, link, mkdir, readdir, readFile, rename, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { err, ok, toolsLayout, type Emit, type Exec, type Fs, type InfraDeps, type SetupDeps, type StartDetached, type UiDeps } from "@devsec/core";
@@ -34,11 +34,17 @@ export const exec: Exec = (c) =>
 
 const missing = (e: unknown) => (e as NodeJS.ErrnoException).code === "ENOENT";
 
+let tmpCounter = 0;
+
 export const fs: Fs = {
   readText: (p) => readFile(p, "utf8").catch((e) => (missing(e) ? undefined : Promise.reject(e))),
+  // Write a temp file and rename it over the target: atomic for readers (the UI), and it never
+  // rewrites a hard-linked file shared with another run.
   writeText: async (p, d) => {
     await mkdir(dirname(p), { recursive: true });
-    await writeFile(p, d);
+    const tmp = `${p}.tmp-${process.pid}-${tmpCounter++}`;
+    await writeFile(tmp, d);
+    await rename(tmp, p);
   },
   appendText: async (p, d) => {
     await mkdir(dirname(p), { recursive: true });
@@ -51,6 +57,11 @@ export const fs: Fs = {
   copyFile: async (a, b) => {
     await mkdir(dirname(b), { recursive: true });
     await copyFile(a, b);
+  },
+  linkFile: async (a, b) => {
+    await mkdir(dirname(b), { recursive: true });
+    await rm(b, { force: true });
+    await link(a, b).catch(() => copyFile(a, b));
   },
   symlink: async (target, p) => {
     await unlink(p).catch(() => {});

@@ -59,7 +59,15 @@ Exit codes: 0 pass, 1 policy deny (or warn with `"failOn": "warn"`), 2 error.
 With uncommitted changes, findings are compared with `HEAD` (the same pipeline on HEAD's
 tree, cached per tree): findings marked `new` are the ones the change introduced, and only
 new deny findings fail the scan. Set `"baseline": "origin/main"` in `devsec.json` or pass
-`--baseline <ref>` for branch-level baselines; `none` disables it. Finding ids are
+`--baseline <ref>` for branch-level baselines; `none` disables it.
+
+Every result carries a one-line `summary` that states both sides, e.g.
+`pass: no new findings (5 existing deny, 9 existing warn from HEAD, not counted)`, plus
+`existing` counts, so a `pass` never reads as "the repo is clean".
+
+**CI on main / release gates:** use `--baseline none` (or `"baseline": "none"`), so
+existing deny findings fail the build too. The HEAD baseline is meant for local
+"did my change make it worse?" scans. Finding ids are
 line-independent (rule + path + matched text), so moving code doesn't make findings "new".
 
 The agent gets a compact view (`byRule` + up to `--limit` findings, `next` to page);

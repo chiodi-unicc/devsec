@@ -23,7 +23,12 @@ export const parseEvents = (text: string): DevsecEvent[] =>
     }
   });
 
-export type RunSummary = RunState & { readonly runId: string; readonly counts?: AgentReport["counts"] };
+export type RunSummary = RunState & {
+  readonly runId: string;
+  readonly counts?: AgentReport["counts"];
+  /** Scanners of a partial scan (only some configured scanners ran). */
+  readonly partialScanners?: readonly string[];
+};
 
 /** From run.json, once the run has finished. */
 export type RunMeta = {
@@ -69,7 +74,12 @@ export const listRunsWith =
         const run = layout.run(runId);
         const state = foldEvents(await loadEvents(deps)(run.dir));
         const report = parse(await deps.fs.readText(run.reportJson)) as AgentReport | undefined;
-        return { ...state, runId, ...(state.status !== "running" && report?.counts ? { counts: report.counts } : {}) };
+        return {
+          ...state,
+          runId,
+          ...(state.status !== "running" && report?.counts ? { counts: report.counts } : {}),
+          ...(report?.partial ? { partialScanners: report.scanners } : {}),
+        };
       }),
     );
     return ok(runs.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0)));

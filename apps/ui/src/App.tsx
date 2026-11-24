@@ -34,6 +34,7 @@ export const App = () => {
                 <Show when={store.state().subject?.headSha}><span class="muted">HEAD <code>{short(store.state().subject?.headSha)}</code></span></Show>
                 <Show when={store.state().subject?.dirty}><span class="tag">uncommitted changes</span></Show>
                 <span class="muted">{ms(total(store.state()))}</span>
+                <Show when={store.loaded() && report()}>{(r) => <span class="summary">{r().summary.replace(/^\w+: /, "")}</span>}</Show>
                 <code class="muted run-id">{runId()}</code>
               </div>
               <Pipeline state={store.state()} meta={store.detail()?.meta} report={report()} />

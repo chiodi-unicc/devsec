@@ -21,6 +21,8 @@ export const workspaceLayout = (repoRoot: string) => {
     uiJson: join(root, "ui.json"),
     uiLog: join(root, "ui.log"),
     defaultPolicy: join(root, "policy", "default"),
+    /** Index: scan key → the run directory holding that scan's tool outputs. */
+    scanIndex: (key: string) => join(root, "cache", "scans", `${key}.json`),
     run: (runId: string) => runLayout(join(root, "runs", runId)),
   };
 };

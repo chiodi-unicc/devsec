@@ -36,5 +36,9 @@ export type DevsecEvent =
       readonly status: StepStatus;
       readonly error?: string;
       readonly findings?: number;
+      /** Why a step was skipped or reused from the cache, in plain words. */
+      readonly reason?: string;
+      /** On the cache step: whether an identical scan was reused, and from which run. */
+      readonly cache?: { readonly hit: boolean; readonly from?: string; readonly scannedAt?: number };
     }
   | { readonly type: "run.finished"; readonly at: number; readonly status: "pass" | "fail" | "error" };

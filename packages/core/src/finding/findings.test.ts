@@ -9,6 +9,7 @@ import { findingsWith } from "./findings.js";
 const f = (id: string): AgentFinding => ({ id, verdict: "deny", severity: "high", scanner: "semgrep", rule: "r", path: "a.py", line: 1, message: id, policy: [] });
 const report = (baseline: boolean): AgentReport => ({
   status: "fail",
+  summary: "",
   runId: "aaaaaaaaaaaa-bbbbbbbb",
   run: "/x",
   scanners: ["semgrep"],

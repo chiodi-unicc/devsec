@@ -15,7 +15,7 @@ import type { Subject } from "../domain/subject.js";
 import type { BaselineInfo } from "../report/json.js";
 import { workspaceLayout, type RunLayout } from "../workspace/layout.js";
 import { toJson } from "./run-tool.js";
-import { scanSteps } from "./steps.js";
+import { clearScanOutputs, scanSteps } from "./steps.js";
 import type { ScanArgs, ScanDeps, ScanOutcome, ScanSteps } from "./types.js";
 
 /** Tools a scan needs, given the enabled scanners. Syft and conftest always run (SBOM, policy). */
@@ -41,16 +41,49 @@ export const scanKey = (a: {
   readonly versions: Readonly<Record<string, string>>;
 }): string => hash(canonicalJson({ ...a, findingsSchema }));
 
-export const runIdOf = (treeSha: string, key: string): string => `${treeSha.slice(0, 12)}-${key.slice(0, 8)}`;
+/**
+ * A run is one judgement: the scan (key) plus what it is compared with and why it ran.
+ * Same scan, different baseline → different run (each keeps its own report); the tool
+ * outputs are shared through the scan cache.
+ */
+export const runIdOf = (treeSha: string, key: string, baselineTree?: string, purpose?: string): string =>
+  `${treeSha.slice(0, 12)}-${hash(canonicalJson({ key, baseline: baselineTree ?? null, purpose: purpose ?? null })).slice(0, 8)}`;
 
 /**
  * Pure: which ref is the baseline. Explicit argument, then devsec.json, then the default:
  * HEAD when scanning uncommitted changes (so an agent sees what it introduced). "none" disables.
  */
-export const resolveBaseline = (arg: string | undefined, configured: string | undefined, s: Subject): string | undefined => {
-  const chosen = arg ?? configured;
-  if (chosen !== undefined) return chosen === "none" ? undefined : chosen;
-  return s.dirty && s.ref === undefined && s.headSha !== undefined ? "HEAD" : undefined;
+export const resolveBaseline = (arg: string | undefined, configured: string | undefined, s: Subject): string | undefined =>
+  baselineDecision(arg, configured, s).ref;
+
+/** Pure: the baseline ref, or why there is none (shown on the skipped Baseline step). */
+export const baselineDecision = (
+  arg: string | undefined,
+  configured: string | undefined,
+  s: Subject,
+  purpose?: "baseline",
+): { readonly ref: string } | { readonly ref?: undefined; readonly reason: string } => {
+  if (purpose === "baseline") return { reason: "this run is itself the baseline for another scan" };
+  if (arg === "none") return { reason: "baseline: none (from --baseline)" };
+  if (arg !== undefined) return { ref: arg };
+  if (configured === "none") return { reason: 'baseline: none (from devsec.json)' };
+  if (configured !== undefined) return { ref: configured };
+  if (s.ref !== undefined) return { reason: `scanning --ref ${s.ref}: no baseline by default (pass --baseline to compare)` };
+  if (s.headSha === undefined) return { reason: "the repository has no commits yet, so there is no HEAD to compare with" };
+  if (!s.dirty) return { reason: "no uncommitted changes: the working tree is HEAD, so nothing can be new" };
+  return { ref: "HEAD" };
+};
+
+/** Pure: why a scanner step did not run. */
+export const scannerSkipReason = (id: ScannerId, configured: readonly ScannerId[], ran: readonly ScannerId[]): string =>
+  configured.includes(id) ? `not requested: this scan ran only ${ran.join(", ")}` : "disabled in devsec.json (scanners)";
+
+/** Pure: "3m ago"-style age for reasons. */
+export const formatAge = (ms: number): string => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.round(s / 60)}m`;
+  return `${Math.round(s / 3600)}h`;
 };
 
 export type StepCommand = { readonly step: StepId; readonly command: Command };
@@ -94,10 +127,12 @@ export const scanWith =
     };
 
     /** Run one step, emitting started/finished; thrown errors (e.g. fs) become `io` errors. */
+    type StepInfo = { readonly findings?: number; readonly reason?: string; readonly cache?: { hit: boolean; from?: string; scannedAt?: number } };
     const step = async <T>(
       id: StepId,
       thunk: () => Promise<Result<T, DevsecError>>,
       count?: (t: T) => number,
+      info?: (t: T) => StepInfo,
     ): Promise<Result<T, DevsecError>> => {
       await record({ type: "step.started", at: deps.now(), step: id });
       let r: Result<T, DevsecError>;
@@ -107,6 +142,7 @@ export const scanWith =
         r = err({ type: "io", detail: `${id}: ${e instanceof Error ? e.message : String(e)}` });
       }
       const findings = r.ok && count ? count(r.value) : undefined;
+      const extra = r.ok && info ? info(r.value) : {};
       await record({
         type: "step.finished",
         at: deps.now(),
@@ -114,12 +150,13 @@ export const scanWith =
         status: r.ok ? "ok" : "failed",
         ...(r.ok ? {} : { error: describeError(r.error) }),
         ...(findings !== undefined ? { findings } : {}),
+        ...extra,
       });
       return r;
     };
-    const mark = (id: StepId, status: StepStatus) =>
+    const mark = (id: StepId, status: StepStatus, reason?: string) =>
       record({ type: "step.started", at: deps.now(), step: id }).then(() =>
-        record({ type: "step.finished", at: deps.now(), step: id, status }),
+        record({ type: "step.finished", at: deps.now(), step: id, status, ...(reason ? { reason } : {}) }),
       );
 
     const [versions, subject] = await Promise.all([
@@ -140,7 +177,17 @@ export const scanWith =
 
     const key = scanKey({ treeSha: s.treeSha, scanners, rulesets: c.semgrep.rulesets, versions: versions.value.found });
     const layout = workspaceLayout(s.repoRoot);
-    const runId = runIdOf(s.treeSha, key);
+
+    // Which tree the findings are compared with is part of the run's identity, so resolve it first.
+    const decision = baselineDecision(args.baseline, c.baseline, s, args.purpose);
+    const baselineRef = decision.ref;
+    let baselineTree: string | undefined;
+    if (baselineRef !== undefined) {
+      const target = await steps.subject(deps)({ cwd: s.repoRoot, ref: baselineRef });
+      if (!target.ok) return target;
+      baselineTree = target.value.treeSha;
+    }
+    const runId = runIdOf(s.treeSha, key, baselineTree, args.purpose);
     const run = layout.run(runId);
 
     await deps.fs.mkdir(run.dir);
@@ -149,51 +196,66 @@ export const scanWith =
     eventsFile = run.events;
     await record({ type: "run.started", at: deps.now(), runId, subject: s, ...(args.purpose ? { purpose: args.purpose } : {}) });
 
-    const cached = await step("cache", () => steps.cache(deps)({ run, key, ttlHours: c.cacheTtlHours }));
+    const cached = await step("cache", () => steps.cache(deps)({ run, layout, key, ttlHours: c.cacheTtlHours }), undefined, (hit) =>
+      hit
+        ? {
+            cache: { hit: true, from: hit.sourceRunId, scannedAt: hit.scannedAt },
+            reason: `hit: reusing the scan from ${hit.sourceRunId === runId ? "this run" : `run ${hit.sourceRunId}`} (${formatAge(deps.now() - hit.scannedAt)} ago)`,
+          }
+        : { cache: { hit: false }, reason: `miss: no identical scan within the ${c.cacheTtlHours}h TTL, running the tools` },
+    );
     let findings: readonly Finding[] = [];
     const errors: string[] = [];
     let snapshotDir = layout.snapshot(s.treeSha);
 
+    const skipReason = (id: ScannerId) => scannerSkipReason(id, c.scanners, scanners);
     if (cached.ok && cached.value) {
       findings = cached.value.findings;
-      for (const id of ["snapshot", "sbom", "semgrep", "trivy-secrets", "trivy-sca"] as const) await mark(id, "cached");
+      const from = cached.value;
+      const why = `reused from an identical scan ${formatAge(deps.now() - from.scannedAt)} ago${from.sourceRunId === runId ? "" : ` (run ${from.sourceRunId})`}`;
+      for (const id of ["snapshot", "sbom"] as const) await mark(id, "cached", why);
+      for (const id of ["semgrep", "trivy-secrets", "trivy-sca"] as const) {
+        await (scanners.includes(id) ? mark(id, "cached", why) : mark(id, "skipped", skipReason(id)));
+      }
     } else {
+      await clearScanOutputs(deps)(run);
       const snap = await step("snapshot", () => steps.snapshot(deps)({ subject: s, layout }));
       if (!snap.ok) return snap;
       snapshotDir = snap.value;
       const input = { snapshot: snap.value, run };
       const count = (fs: Finding[]) => fs.length;
-      const skip = (id: StepId) => mark(id, "skipped").then(() => ok<Finding[]>([]));
+      const skip = (id: StepId, reason: string) => mark(id, "skipped", reason).then(() => ok<Finding[]>([]));
 
       const sbom = step("sbom", () => steps.sbom(deps)(input));
       const results = await Promise.all([
         scanners.includes("semgrep")
           ? step("semgrep", () => steps.semgrep(deps)({ ...input, rulesets: c.semgrep.rulesets }), count)
-          : skip("semgrep"),
-        scanners.includes("trivy-secrets") ? step("trivy-secrets", () => steps.trivySecrets(deps)(input), count) : skip("trivy-secrets"),
+          : skip("semgrep", skipReason("semgrep")),
+        scanners.includes("trivy-secrets")
+          ? step("trivy-secrets", () => steps.trivySecrets(deps)(input), count)
+          : skip("trivy-secrets", skipReason("trivy-secrets")),
         sbom.then((b) =>
-          !scanners.includes("trivy-sca") || !b.ok
-            ? skip("trivy-sca")
-            : step("trivy-sca", () => steps.trivySca(deps)({ ...input, sbom: b.value }), count),
+          !scanners.includes("trivy-sca")
+            ? skip("trivy-sca", skipReason("trivy-sca"))
+            : !b.ok
+              ? skip("trivy-sca", "needs the SBOM, which failed (see Syft SBOM)")
+              : step("trivy-sca", () => steps.trivySca(deps)({ ...input, sbom: b.value }), count),
         ),
         sbom.then((b) => (b.ok ? ok<Finding[]>([]) : b)),
       ]);
       for (const r of results) if (!r.ok) errors.push(describeError(r.error));
       findings = results.flatMap((r) => (r.ok ? r.value : []));
-      await steps.saveScan(deps)({ run, key, findings, complete: errors.length === 0 });
+      await steps.saveScan(deps)({ run, layout, key, findings, complete: errors.length === 0 });
     }
 
     // Baseline: same pipeline on the baseline tree (cached per tree), progress silenced.
-    const baselineRef = args.purpose ? undefined : resolveBaseline(args.baseline, c.baseline, s);
     let baseline: BaselineInfo | undefined;
-    if (baselineRef === undefined) {
-      await mark("baseline", "skipped");
+    if (baselineRef === undefined || baselineTree === undefined) {
+      await mark("baseline", "skipped", decision.ref === undefined ? decision.reason : undefined);
     } else {
       const b = await step("baseline", async () => {
-        // Same tree as the subject: nothing can be new, and a nested scan would reuse this run's directory.
-        const target = await steps.subject(deps)({ cwd: s.repoRoot, ref: baselineRef });
-        if (!target.ok) return target;
-        if (target.value.treeSha === s.treeSha) {
+        // Same tree as the subject: nothing can be new.
+        if (baselineTree === s.treeSha) {
           return ok<BaselineInfo>({ ref: baselineRef, tree: s.treeSha, ids: new Set(findings.map((f) => f.id)) });
         }
         const r = await scanWith(steps)({ ...deps, emit: () => {} })({
@@ -221,13 +283,13 @@ export const scanWith =
 
     const report = await step(
       "report",
-      () => steps.report(deps)({ subject: s, runId, run, scanners, judgement, errors, failOn: c.failOn, ...(baseline ? { baseline } : {}) }),
+      () => steps.report(deps)({ subject: s, runId, run, scanners, partial, judgement, errors, failOn: c.failOn, ...(baseline ? { baseline } : {}) }),
       (r) => r.findings.length,
     );
     if (!report.ok) return report;
 
-    // Only a full, non-baseline scan becomes "latest"; partial and baseline scans keep their own run id.
-    const full = c.scanners.every((x) => scanners.includes(x)) && args.purpose === undefined;
+    // Only a full scan of the working tree becomes "latest"; partial, --ref and baseline scans keep their own run id.
+    const full = !partial && args.purpose === undefined && s.ref === undefined;
     if (full) await deps.fs.symlink(`runs/${runId}`, layout.latest);
     await record({ type: "run.finished", at: deps.now(), status: report.value.status });
     await deps.fs.writeText(

@@ -32,11 +32,15 @@ export type Status = "pass" | "fail" | "error";
 
 export type AgentReport = {
   readonly status: Status;
+  /** One line that states both what the status means and what it does not (existing findings). */
+  readonly summary: string;
   readonly subject: { readonly tree: string; readonly head?: string; readonly dirty: boolean };
   readonly runId: string;
   readonly run: string;
   /** Scanners this run used; a subset means a partial scan (it does not move .devsec/latest). */
   readonly scanners: readonly ScannerId[];
+  /** Not every configured scanner ran. */
+  readonly partial?: boolean;
   /** With a baseline, only new findings decide the status; existing ones are still listed. */
   readonly baseline?: { readonly ref: string; readonly tree: string; readonly runId?: string };
   /** found = all tool findings = flagged (deny + warn) + dropped (no policy rule matched). new ⊆ flagged. */
@@ -49,6 +53,8 @@ export type AgentReport = {
     readonly new?: number;
     readonly newDeny?: number;
   };
+  /** With a baseline: flagged findings that already existed there (they do not affect the status). */
+  readonly existing?: { readonly deny: number; readonly warn: number };
   readonly errors: readonly string[];
   readonly policy: { readonly deny: readonly Violation[]; readonly warn: readonly Violation[] };
   readonly findings: readonly AgentFinding[];
@@ -85,11 +91,40 @@ export const statusOf = (
   return denies > 0 || (failOn === "warn" && warns > 0) ? "fail" : "pass";
 };
 
+const plural = (n: number, word: string) => `${n} ${word}`;
+
+/** Pure: the one-line reading of a result. */
+export const summarize = (r: {
+  readonly status: Status;
+  /** Scanners that ran, when not all configured scanners did. */
+  readonly partialScanners?: readonly string[];
+  readonly errors: number;
+  readonly baselineRef?: string;
+  readonly deny: number;
+  readonly warn: number;
+  readonly newDeny: number;
+  readonly newWarn: number;
+  readonly existing?: { readonly deny: number; readonly warn: number };
+}): string => {
+  const head = r.partialScanners ? `${r.status} (${r.partialScanners.join(", ")} only)` : r.status;
+  const err = r.errors > 0 ? `${head}: ${plural(r.errors, r.errors === 1 ? "scanner error" : "scanner errors")}; ` : `${head}: `;
+  if (r.baselineRef === undefined || r.existing === undefined) {
+    return `${err}${plural(r.deny, "deny")}, ${plural(r.warn, "warn")} (no baseline: all findings count)`;
+  }
+  const fresh = r.newDeny + r.newWarn === 0 ? "no new findings" : `${plural(r.newDeny, "new deny")}, ${plural(r.newWarn, "new warn")}`;
+  const before =
+    r.existing.deny + r.existing.warn === 0
+      ? `nothing existing in ${r.baselineRef}`
+      : `${plural(r.existing.deny, "existing deny")}, ${plural(r.existing.warn, "existing warn")} from ${r.baselineRef}, not counted`;
+  return `${err}${fresh} (${before})`;
+};
+
 export const agentReport = (a: {
   readonly subject: Subject;
   readonly runId: string;
   readonly runDir: string;
   readonly scanners: readonly ScannerId[];
+  readonly partial?: boolean;
   readonly judgement: Judgement;
   readonly errors: readonly string[];
   readonly failOn: Config["failOn"];
@@ -99,12 +134,29 @@ export const agentReport = (a: {
   const isNew = (x: Judged) => (b ? !b.ids.has(x.finding.id) : false);
   const sorted = [...j.flagged].sort((x, y) => Number(isNew(y)) - Number(isNew(x)) || rank(x) - rank(y));
   const fresh = j.flagged.filter(isNew);
+  const old = j.flagged.filter((x) => !isNew(x));
+  const status = statusOf(j, a.failOn, a.errors, b);
+  const count = (xs: readonly Judged[], v: Verdict) => xs.filter((x) => x.verdict === v).length;
+  const existing = b ? { deny: count(old, "deny"), warn: count(old, "warn") } : undefined;
   return {
-    status: statusOf(j, a.failOn, a.errors, b),
+    status,
+    summary: summarize({
+      status,
+      ...(a.partial ? { partialScanners: a.scanners } : {}),
+      errors: a.errors.length,
+      ...(b ? { baselineRef: b.ref } : {}),
+      deny: count(j.flagged, "deny"),
+      warn: count(j.flagged, "warn"),
+      newDeny: count(fresh, "deny"),
+      newWarn: count(fresh, "warn"),
+      ...(existing ? { existing } : {}),
+    }),
+    ...(existing ? { existing } : {}),
     subject: { tree: a.subject.treeSha, ...(a.subject.headSha ? { head: a.subject.headSha } : {}), dirty: a.subject.dirty },
     runId: a.runId,
     run: a.runDir,
     scanners: a.scanners,
+    ...(a.partial ? { partial: true } : {}),
     ...(b ? { baseline: { ref: b.ref, tree: b.tree, ...(b.runId ? { runId: b.runId } : {}) } } : {}),
     counts: {
       found: j.flagged.length + j.dropped,

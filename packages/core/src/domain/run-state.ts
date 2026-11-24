@@ -7,6 +7,8 @@ export type StepState = {
   readonly finishedAt?: number;
   readonly error?: string;
   readonly findings?: number;
+  readonly reason?: string;
+  readonly cache?: { readonly hit: boolean; readonly from?: string; readonly scannedAt?: number };
 };
 
 export type RunState = {
@@ -37,6 +39,8 @@ export const reduceEvent = (s: RunState, e: DevsecEvent): RunState => {
         finishedAt: e.at,
         ...(e.error !== undefined ? { error: e.error } : {}),
         ...(e.findings !== undefined ? { findings: e.findings } : {}),
+        ...(e.reason !== undefined ? { reason: e.reason } : {}),
+        ...(e.cache !== undefined ? { cache: e.cache } : {}),
       };
       return { ...s, steps: { ...s.steps, [e.step]: step } };
     }
